@@ -9,6 +9,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 from transformers import AutoTokenizer, HfArgumentParser, pipeline, AutoModelForCausalLM
 from accelerate import Accelerator
+from datasets import load_dataset, Dataset
 
 tqdm.pandas()
 
@@ -57,7 +58,6 @@ parser = HfArgumentParser(ScriptArguments)
 script_args = parser.parse_args_into_dataclasses()[0]
 
 device = accelerator.device
-device = accelerator.device
 
 model = AutoModelForCausalLM.from_pretrained(script_args.reward_name_or_path,
                                              torch_dtype=torch.bfloat16).to(device)
@@ -90,39 +90,6 @@ We process the data format here and query the reward model to get the rewards.
 """
 temperature=1.0
 
-
-def comp(context, responses):
-    probs_chosen = []
-    for chosen_position in [0, 1]:
-        # swap order to mitigate position bias
-        response_A = responses[chosen_position]
-        response_B = responses[1 - chosen_position]
-        prompt = prompt_template.format(context=context, response_A=response_A, response_B=response_B)
-        message = [
-            {"role": "user", "content": prompt},
-        ]
-        input_ids = tokenizer.apply_chat_template(message, add_generation_prompt=True, return_tensors='pt').to(device)
-
-        with torch.no_grad():
-            output = model(input_ids)
-        logit_A = output.logits[0, -1, token_id_A].item()
-        logit_B = output.logits[0, -1, token_id_B].item()
-        # take softmax to get the probability; using numpy
-        Z = np.exp(logit_A / temperature) + np.exp(logit_B / temperature)
-        logit_chosen = [logit_A, logit_B][chosen_position]
-        prob_chosen = np.exp(logit_chosen / temperature) / Z
-        probs_chosen.append(prob_chosen)
-    avg_prob_chosen = np.mean(probs_chosen)
-    
-    if avg_prob_chosen == 0.5:
-        #print("The ranking model gives equal probability for the following responses: ", responses)
-        print("You")
-    if avg_prob_chosen > 0.5:
-        return 0
-    elif avg_prob_chosen == 0.5:
-        return 0.5
-    else:
-        return 1
     
 
 def get_prob_A(txt):
@@ -141,56 +108,28 @@ def get_prob_A(txt):
     prob_chosen = np.exp(logit_chosen / temperature) / Z
     return prob_chosen
 
-def full_pairwise_ranking(prom, test_texts):
-    # Initialize score dictionary
-    scores = {txt: 0 for txt in test_texts}
-    
-    # Compare every pair of items
-    for i in range(len(test_texts)):
-        for j in range(i + 1, len(test_texts)):
-            result = comp(prom, [test_texts[i], test_texts[j]])
-            if result == 0:
-                scores[test_texts[i]] += 1
-            elif result == 0.5:
-                scores[test_texts[i]] += 0.5
-                scores[test_texts[j]] += 0.5
-            else:
-                scores[test_texts[j]] += 1
-
-    
-    # Rank items based on scores in descending order
-    #ranked_items = sorted(scores, key=scores.get, reverse=True)
-    return scores
-
-
 
 
 
 data = []
-
-
+z = 0
 # tqdm is used to show the progress bar
 with torch.no_grad():
     for sample in tqdm(ds):
-
-        #tmp_prompt = sample['prompt']
-
-        #test_texts = sample['responses']
-
-
-        #map_original_texts = {test_texts[j]: [sample['responses'][j], sample['rewards'][j]] for j in range(len(test_texts))}
-        #map_original_texts = {test_texts[j]: sample['responses'][j] for j in range(len(test_texts))}
         
-        #scores = full_pairwise_ranking(tmp_prompt, test_texts)
-
         txt = sample['messages'][0]['content']
 
-        #rewards = [scores[txt] for txt in test_texts]
         prob_A = get_prob_A(txt)
 
         data.append({"messages": sample['messages'], "prob_A": prob_A})
-
-
+        if z == 0:
+            print("we print an example to monitor the process")
+            tmp_message = [
+                {"role": "user", "content": txt},
+            ]
+            print(tokenizer.apply_chat_template(message, add_generation_prompt=True, tokenize=False))
+            z += 1
+            
 # Send the data to other GPUs
 world_size = int(os.getenv("WORLD_SIZE", "1"))
 all_process_list = [{}] * world_size
@@ -220,9 +159,16 @@ if local_rank == 0:
         )
     )
 
-    output_eval_dataset = {}
-    output_eval_dataset["type"] = "text_only"
-    output_eval_dataset["instances"] = gathered_data
-    with open(script_args.output_dir, "w", encoding="utf8") as f:
-        json.dump(output_eval_dataset, f, ensure_ascii=False)
+    dict_data = {
+        "messages": [d['messages'] for d in gathered_data],
+        "prob_A": [d['prob_A'] for d in gathered_data]
+    }
+    dataset = Dataset.from_dict(dict_data)
+    DatasetDict({'train': dataset}).push_to_hub(script_args.output_dir)
+    
+    #output_eval_dataset = {}
+    #output_eval_dataset["type"] = "text_only"
+    #output_eval_dataset["instances"] = gathered_data
+    #with open(script_args.output_dir, "w", encoding="utf8") as f:
+    #    json.dump(output_eval_dataset, f, ensure_ascii=False)
 
