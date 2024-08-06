@@ -61,7 +61,7 @@ device = accelerator.device
 
 model = AutoModelForCausalLM.from_pretrained(script_args.reward_name_or_path,
                                              torch_dtype=torch.bfloat16).to(device)
-tokenizer = AutoTokenizer.from_pretrained("raftrsf/pair_pref", use_fast=True)
+tokenizer = AutoTokenizer.from_pretrained(script_args.reward_name_or_path, use_fast=True)
 
 
 prompt_template = "[CONTEXT] {context} [RESPONSE A] {response_A} [RESPONSE B] {response_B} \n"
