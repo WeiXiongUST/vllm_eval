@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 import numpy as np
 import torch
-from datasets import load_dataset
+from datasets import load_dataset, DatasetDict
 from tqdm import tqdm
 from transformers import AutoTokenizer, HfArgumentParser, pipeline, AutoModelForCausalLM
 from accelerate import Accelerator
@@ -26,11 +26,11 @@ class ScriptArguments:
     """
 
     dataset_name_or_path: Optional[str] = field(
-        default="/home/cyeab/ultra_onpolicy/Online-RLHF/alpaca_k8_sft_gen.json",
+        default="RLHFlow/pair_preference_model_dataset",
         metadata={"help": "the location of the dataset name or path"},
     )
     output_dir: Optional[str] = field(
-        default="alpaca_k8_sft_gen_pm.json",
+        default="weqweasdas/xxxx_test",
         metadata={"help": "the location of the output file"},
     )
     # No need to set record_dir
@@ -76,7 +76,7 @@ world_size = int(os.getenv("WORLD_SIZE", "1"))
 
 ####### The dataset is supposed to contain {"prompt": prompt, "responses": [response1, response2, ..., responsek]}
 # No additional format! Just raw prompt and response.
-ds = load_dataset(data_files=ds_dir, split="train")
+ds = load_dataset(ds_dir, split="train").select(range(100))
 
 local_rank = Accelerator().local_process_index
 
@@ -127,7 +127,7 @@ with torch.no_grad():
             tmp_message = [
                 {"role": "user", "content": txt},
             ]
-            print(tokenizer.apply_chat_template(message, add_generation_prompt=True, tokenize=False))
+            print(tokenizer.apply_chat_template(tmp_message, add_generation_prompt=True, tokenize=False))
             z += 1
             
 # Send the data to other GPUs
