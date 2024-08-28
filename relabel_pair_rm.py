@@ -84,7 +84,6 @@ We process the data format here and query the reward model to get the rewards.
 """
 temperature=1.0
 
-
 def comp(context, responses):
     probs_chosen = []
     for chosen_position in [0, 1]:
@@ -118,7 +117,23 @@ def comp(context, responses):
         return 0.5
     else:
         return 1
-    
+
+def tournament(prop, test_texts):
+    round = test_texts[:]
+    while len(round) > 1:
+        next_round = []
+        # Pair up items and determine the winner of each pair
+        for i in range(0, len(round), 2):
+            result = comp(prop, [round[i], round[i + 1]])
+            if result == 0:
+                next_round.append(round[i])
+            else:
+                next_round.append(round[i + 1])
+        round = next_round
+        print(f"Current round results: {round}")  # Optional: to see the progression
+
+    return round[0] if round else None  # Return the winner
+
 
 def full_pairwise_ranking(prom, test_texts):
     # Initialize score dictionary
